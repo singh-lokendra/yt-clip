@@ -1,6 +1,6 @@
 # yt-clip
 
-Cut a clip out of a YouTube video by start and end time.
+Cut a clip out of a YouTube video, or a local video file, by start and end time.
 
 ```sh
 brew install singh-lokendra/tap/yt-clip
@@ -12,8 +12,10 @@ it to solve YouTube's JS challenges).
 ## Usage
 
 ```sh
-yt-clip <url> <start> <end> [output-name]
+yt-clip <url|file> <start> <end> [output-name]
 ```
+
+- `url|file`: a YouTube (or any yt-dlp supported) URL, or a path to a local video
 
 - `start` / `end`: `HH:MM:SS`, `MM:SS` or seconds
 - `output-name`: without extension (default `clip-<start>-<end>`); the clip is written as
@@ -23,9 +25,12 @@ yt-clip <url> <start> <end> [output-name]
 yt-clip "https://youtu.be/eJmpTKQHjP0" 00:34:00 00:38:30 spiritual-talk-clip
 yt-clip "https://youtu.be/eJmpTKQHjP0" 34:00 38:30
 yt-clip "https://youtu.be/eJmpTKQHjP0" 2040 2310 talk
+yt-clip ~/Movies/talk.mkv 1:02:10 1:05:00 talk-part2
 ```
 
 ## How it works
+
+Local files are cut directly with ffmpeg (H.264 + AAC, frame-accurate). For URLs:
 
 1. Tries `yt-dlp --download-sections`, which fetches only the requested range.
 2. Checks the result's duration with `ffprobe`. If the section download failed or wrote an empty

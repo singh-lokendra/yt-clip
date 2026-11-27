@@ -1,25 +1,26 @@
 #!/usr/bin/env bash
-# Cut a clip out of a YouTube video.
+# Cut a clip out of a YouTube video or a local video file.
 #
-# Tries yt-dlp --download-sections first. That fails (or writes an empty file) for
+# Local files are cut directly with ffmpeg. For URLs it tries yt-dlp --download-sections first. That fails (or writes an empty file) for
 # livestreams YouTube is still processing ("post_live"), so on failure it downloads the
 # full stream with yt-dlp's native downloader and cuts the clip locally with ffmpeg.
 
 set -euo pipefail
 
-VERSION=0.1.0
+VERSION=0.2.0
 
 usage() {
   cat <<'USAGE'
-Usage: yt-clip <url> <start> <end> [output-name]
+Usage: yt-clip <url|file> <start> <end> [output-name]
 
+  url|file     a YouTube (or any yt-dlp supported) URL, or a local video file
   start/end    HH:MM:SS, MM:SS or seconds
   output-name  without extension (default: clip-<start>-<end>)
 
 Examples:
   yt-clip "https://youtu.be/eJmpTKQHjP0" 00:34:00 00:38:30 spiritual-talk-clip
   yt-clip "https://youtu.be/eJmpTKQHjP0" 34:00 38:30
-  yt-clip "https://youtu.be/eJmpTKQHjP0" 2040 2310 talk
+  yt-clip ~/Movies/talk.mkv 1:02:10 1:05:00 talk-part2
 USAGE
 }
 
@@ -37,7 +38,18 @@ url=$1 start=$2 end=$3
 name=${4:-clip-${start//:/}-${end//:/}}
 out="$name.mp4"
 
-for cmd in yt-dlp ffmpeg ffprobe; do
+local_file=false
+if [[ -f "$url" ]]; then
+  local_file=true
+  deps=(ffmpeg ffprobe)
+elif [[ "$url" =~ ^[a-zA-Z][a-zA-Z0-9+.-]*:// ]]; then
+  deps=(yt-dlp ffmpeg ffprobe)
+else
+  echo "Not a URL and no such file: $url" >&2
+  exit 1
+fi
+
+for cmd in "${deps[@]}"; do
   command -v "$cmd" >/dev/null || { echo "Missing dependency: $cmd (brew install $cmd)" >&2; exit 1; }
 done
 
@@ -61,6 +73,31 @@ valid_clip() {
   [[ "$d" =~ ^[0-9.]+$ ]] && awk -v d="$d" -v want="$duration" 'BEGIN { exit !(d > want - 2 && d < want + 2) }'
 }
 
+cut_clip() {
+  ffmpeg -hide_banner -loglevel error -y \
+    -ss "$start_s" -i "$1" -t "$duration" \
+    -map 0:v:0 -map '0:a:0?' \
+    -c:v libx264 -preset veryfast -crf 20 -c:a aac -b:a 160k -movflags +faststart \
+    "$out"
+}
+
+if $local_file; then
+  in_abs=$(cd "$(dirname "$url")" && pwd)/$(basename "$url")
+  out_abs=$(pwd)/$out
+  [[ "$in_abs" != "$out_abs" ]] || { echo "Output would overwrite the input; pass a different output-name" >&2; exit 1; }
+
+  src_d=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$url" 2>/dev/null || true)
+  [[ "$src_d" =~ ^[0-9.]+$ ]] || { echo "Not a readable video: $url" >&2; exit 1; }
+  awk -v d="$src_d" -v e="$end_s" 'BEGIN { exit !(e <= d + 1) }' ||
+    { echo "End ($end) is past the end of the video (${src_d%.*}s)" >&2; exit 1; }
+
+  echo "==> Cutting $url ($start -> $end)"
+  cut_clip "$url"
+  valid_clip "$out" || { echo "Clip looks wrong; check $out" >&2; exit 1; }
+  echo "==> Done: $out"
+  exit 0
+fi
+
 rm -f "$out"
 
 echo "==> Trying direct section download ($start -> $end)"
@@ -78,10 +115,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 yt-dlp -N 8 -f "bv*+ba/b" --merge-output-format mp4 -o "$tmp/full.%(ext)s" "$url"
 
-ffmpeg -hide_banner -loglevel error -y \
-  -ss "$start_s" -i "$tmp/full.mp4" -t "$duration" \
-  -c:v libx264 -preset veryfast -crf 20 -c:a aac -b:a 160k -movflags +faststart \
-  "$out"
+cut_clip "$tmp/full.mp4"
 
 valid_clip "$out" || { echo "Clip looks wrong; check $out" >&2; exit 1; }
 echo "==> Done: $out"
