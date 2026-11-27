@@ -1,0 +1,21 @@
+bin/yt-clip
+  s_e725c90557209d::t_e3490670f60e24 1-87
+README.md
+  s_e725c90557209d::t_7058f1d33bc855 1-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "06cf4322c25df58b2efc209cf2f97881667b8408",
+  "prompts": {},
+  "sessions": {
+    "s_e725c90557209d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "849785bf-f623-4eea-8e69-e445d901dbf6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Lokendra Singh <lokendra.singh@1mg.com>"
+    }
+  }
+}
