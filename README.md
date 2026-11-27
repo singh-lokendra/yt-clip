@@ -16,7 +16,6 @@ yt-clip <url|file> <start> <end> [output-name]
 ```
 
 - `url|file`: a YouTube (or any yt-dlp supported) URL, or a path to a local video
-
 - `start` / `end`: `HH:MM:SS`, `MM:SS` or seconds
 - `output-name`: without extension (default `clip-<start>-<end>`); the clip is written as
   `<output-name>.mp4` in the current directory
