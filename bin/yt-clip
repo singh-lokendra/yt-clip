@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Cut a clip out of a YouTube video.
+#
+# Tries yt-dlp --download-sections first. That fails (or writes an empty file) for
+# livestreams YouTube is still processing ("post_live"), so on failure it downloads the
+# full stream with yt-dlp's native downloader and cuts the clip locally with ffmpeg.
+
+set -euo pipefail
+
+VERSION=0.1.0
+
+usage() {
+  cat <<'USAGE'
+Usage: yt-clip <url> <start> <end> [output-name]
+
+  start/end    HH:MM:SS, MM:SS or seconds
+  output-name  without extension (default: clip-<start>-<end>)
+
+Examples:
+  yt-clip "https://youtu.be/eJmpTKQHjP0" 00:34:00 00:38:30 spiritual-talk-clip
+  yt-clip "https://youtu.be/eJmpTKQHjP0" 34:00 38:30
+  yt-clip "https://youtu.be/eJmpTKQHjP0" 2040 2310 talk
+USAGE
+}
+
+case "${1:-}" in
+  -h | --help) usage; exit 0 ;;
+  -v | --version | version) echo "yt-clip $VERSION"; exit 0 ;;
+esac
+
+if [[ $# -lt 3 ]]; then
+  usage >&2
+  exit 1
+fi
+
+url=$1 start=$2 end=$3
+name=${4:-clip-${start//:/}-${end//:/}}
+out="$name.mp4"
+
+for cmd in yt-dlp ffmpeg ffprobe; do
+  command -v "$cmd" >/dev/null || { echo "Missing dependency: $cmd (brew install $cmd)" >&2; exit 1; }
+done
+
+to_seconds() {
+  local t=$1 s=0 part
+  [[ "$t" =~ ^[0-9]+(:[0-9]+){0,2}$ ]] || { echo "Invalid time: $t" >&2; return 1; }
+  IFS=: read -ra parts <<<"$t"
+  for part in "${parts[@]}"; do s=$((s * 60 + 10#$part)); done
+  echo "$s"
+}
+
+start_s=$(to_seconds "$start")
+end_s=$(to_seconds "$end")
+duration=$((end_s - start_s))
+((duration > 0)) || { echo "End must be after start" >&2; exit 1; }
+
+# A clip is valid if its duration is within 2s of what we asked for.
+valid_clip() {
+  local d
+  d=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$1" 2>/dev/null || true)
+  [[ "$d" =~ ^[0-9.]+$ ]] && awk -v d="$d" -v want="$duration" 'BEGIN { exit !(d > want - 2 && d < want + 2) }'
+}
+
+rm -f "$out"
+
+echo "==> Trying direct section download ($start -> $end)"
+if yt-dlp --force-overwrites --force-keyframes-at-cuts \
+     --download-sections "*$start-$end" \
+     --merge-output-format mp4 -o "$name.%(ext)s" "$url" && valid_clip "$out"; then
+  echo "==> Done: $out"
+  exit 0
+fi
+
+echo "==> Direct section download failed; downloading full stream and cutting locally"
+rm -f "$out"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+yt-dlp -N 8 -f "bv*+ba/b" --merge-output-format mp4 -o "$tmp/full.%(ext)s" "$url"
+
+ffmpeg -hide_banner -loglevel error -y \
+  -ss "$start_s" -i "$tmp/full.mp4" -t "$duration" \
+  -c:v libx264 -preset veryfast -crf 20 -c:a aac -b:a 160k -movflags +faststart \
+  "$out"
+
+valid_clip "$out" || { echo "Clip looks wrong; check $out" >&2; exit 1; }
+echo "==> Done: $out"
